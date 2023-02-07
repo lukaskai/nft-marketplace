@@ -1,0 +1,2 @@
+openzeppelin-contracts/=lib/openzeppelin-contracts/
+compound-protocol/=lib/compound-protocol/
