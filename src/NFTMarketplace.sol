@@ -4,8 +4,9 @@ pragma solidity ^0.8.17;
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
+import "openzeppelin-contracts/contracts/access/Ownable.sol";
 
-contract NFTMarketplace is ReentrancyGuard {
+contract NFTMarketplace is ReentrancyGuard, Ownable {
     /**
      * @notice Types
      */
@@ -23,6 +24,7 @@ contract NFTMarketplace is ReentrancyGuard {
     mapping(address => mapping(uint256 => Listing)) private listings;
     mapping(address => mapping(address => uint256)) private earnings;
     mapping(address => bool) public supportedAssets;
+    uint8 public platformFeeBps;
 
     /**
      * @notice Events
@@ -133,8 +135,9 @@ contract NFTMarketplace is ReentrancyGuard {
     /**
      * @notice Constructor
      */
-    constructor(address[] memory _supportedAssets) {
+    constructor(address[] memory _supportedAssets, uint8 _platformFeeBps) {
         if (_supportedAssets.length == 0) revert NoSupportedAssetsProvided();
+        platformFeeBps = _platformFeeBps;
 
         for (uint256 i = 0; i < _supportedAssets.length; i++) {
             supportedAssets[_supportedAssets[i]] = true;
@@ -235,7 +238,14 @@ contract NFTMarketplace is ReentrancyGuard {
         }
 
         asset.transferFrom(msg.sender, address(this), listedItem.price);
-        earnings[listedItem.seller][listedItem.asset] += listedItem.price;
+        uint platformFeeAmount = 0;
+        if (listedItem.price > 100000000) {
+            platformFeeAmount = listedItem.price * platformFeeBps / 10_000;
+        }
+
+
+        earnings[listedItem.seller][listedItem.asset] += listedItem.price - platformFeeAmount;
+        earnings[address(this)][listedItem.asset] += platformFeeAmount;
 
         delete (listings[nftAddress][tokenId]);
         IERC721(nftAddress).safeTransferFrom(
@@ -265,5 +275,20 @@ contract NFTMarketplace is ReentrancyGuard {
 
         IERC20 asset = IERC20(assetAddress);
         asset.transfer(msg.sender, sellerEarnings);
+    }
+
+    /**
+     * @notice Withdraw platform earnings.
+     */
+    function withdrawPlatformEarnings(
+        address assetAddress
+    ) external isSupportedAsset(assetAddress) onlyOwner {
+        uint256 platformEarnings = earnings[address(this)][assetAddress];
+        if (platformEarnings <= 0) revert NoEarnings(assetAddress);
+
+        earnings[address(this)][assetAddress] = 0;
+
+        IERC20 asset = IERC20(assetAddress);
+        asset.transfer(msg.sender, platformEarnings);
     }
 }

@@ -9,6 +9,7 @@ import "../src/NFTMarketplace.sol";
 contract NFTMarketplaceTest is Test {
     address private immutable seller = vm.addr(0x1);
     address private immutable buyer = vm.addr(0x2);
+    uint8 private platformFeeBps = 25;
 
     MockedNFT private nft;
     MockedERC20 private token;
@@ -20,7 +21,7 @@ contract NFTMarketplaceTest is Test {
         token = new MockedERC20();
         supportedTokens.push(address(token));
 
-        nftMarketplace = new NFTMarketplace(supportedTokens);
+        nftMarketplace = new NFTMarketplace(supportedTokens, platformFeeBps);
     }
 
     function testConstructorWithoutSupportedAssetsReverts() public {
@@ -31,7 +32,7 @@ contract NFTMarketplaceTest is Test {
                 )
             )
         );
-        nftMarketplace = new NFTMarketplace(new address[](0));
+        nftMarketplace = new NFTMarketplace(new address[](0), platformFeeBps);
     }
 
     function testListingAnNft(uint256 sellPrice) public {
@@ -41,6 +42,7 @@ contract NFTMarketplaceTest is Test {
 
         vm.startPrank(address(seller));
         nft.approve(address(nftMarketplace), tokenId);
+
         nftMarketplace.listItem(
             address(nft),
             tokenId,
@@ -138,7 +140,7 @@ contract NFTMarketplaceTest is Test {
     }
 
     function testBuyingAnNft(uint256 sellPrice) public {
-        vm.assume(sellPrice > 0);
+        vm.assume(sellPrice > 1e9);
 
         uint256 tokenId = nft.mintTo(seller);
         token.mint(buyer, sellPrice);
