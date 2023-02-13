@@ -139,8 +139,8 @@ contract NFTMarketplaceTest is Test {
         vm.stopPrank();
     }
 
-    function testBuyingAnNft(uint256 sellPrice) public {
-        vm.assume(sellPrice > 1e9);
+    function testBuyingAnNftWithAmountAboveMinimum10000() public {
+        uint256 sellPrice = 1e9 - 1;
 
         uint256 tokenId = nft.mintTo(seller);
         token.mint(buyer, sellPrice);
@@ -168,10 +168,70 @@ contract NFTMarketplaceTest is Test {
         assertEq(token.balanceOf(buyer), 0);
         assertEq(nft.ownerOf(tokenId), address(buyer));
         assertEq(storedListing.seller, address(0));
+
+        uint256 expectedFeeAmount = sellPrice * platformFeeBps / 10_000;
+        assertEq(nftMarketplace.getEarnings(address(nftMarketplace), address(token)), expectedFeeAmount);
+        assertEq(nftMarketplace.getEarnings(seller, address(token)), sellPrice - expectedFeeAmount);
+    }
+
+    function testBuyingAnNftWithAmountAboveMinimum10000ResultsInNoFee() public {
+        uint256 sellPrice = 9999;
+
+        uint256 tokenId = nft.mintTo(seller);
+        token.mint(buyer, sellPrice);
+
+        vm.startPrank(address(seller));
+        nft.approve(address(nftMarketplace), tokenId);
+        nftMarketplace.listItem(
+            address(nft),
+            tokenId,
+            sellPrice,
+            address(token)
+        );
+        vm.stopPrank();
+
+        vm.startPrank(address(buyer));
+        token.approve(address(nftMarketplace), sellPrice);
+        nftMarketplace.buyItem(address(nft), tokenId);
+        vm.stopPrank();
+
+        NFTMarketplace.Listing memory storedListing = nftMarketplace.getListing(
+            address(nft),
+            tokenId
+        );
+
+        assertEq(token.balanceOf(buyer), 0);
+        assertEq(nft.ownerOf(tokenId), address(buyer));
+        assertEq(storedListing.seller, address(0));
+        assertEq(nftMarketplace.getEarnings(seller, address(token)), sellPrice);
+        assertEq(nftMarketplace.getEarnings(address(nftMarketplace), address(token)), 0);
+    }
+
+    function testBuyingAnNftWithAmountWhichCausesOverflowReverts() public {
+        uint256 sellPrice = type(uint256).max;
+
+        uint256 tokenId = nft.mintTo(seller);
+        token.mint(buyer, sellPrice);
+
+        vm.startPrank(address(seller));
+        nft.approve(address(nftMarketplace), tokenId);
+        nftMarketplace.listItem(
+            address(nft),
+            tokenId,
+            sellPrice,
+            address(token)
+        );
+        vm.stopPrank();
+
+        vm.startPrank(address(buyer));
+        token.approve(address(nftMarketplace), sellPrice);
+        vm.expectRevert();
+        nftMarketplace.buyItem(address(nft), tokenId);
+        vm.stopPrank();
     }
 
     function testBuyingAnNftWithoutProperTokenSpendingApprovalReverts() public {
-        uint256 sellPrice = 1 ether;
+        uint256 sellPrice = 1e18;
         uint256 tokenId = nft.mintTo(seller);
         token.mint(buyer, sellPrice);
 
@@ -204,7 +264,7 @@ contract NFTMarketplaceTest is Test {
     }
 
     function testBuyingAnNftWithoutProperBalanceReverts() public {
-        uint256 sellPrice = 1 ether;
+        uint256 sellPrice = 1e18;
         uint256 tokenId = nft.mintTo(seller);
         token.mint(buyer, sellPrice - 1);
 
@@ -236,8 +296,9 @@ contract NFTMarketplaceTest is Test {
         vm.stopPrank();
     }
 
-    function testWithdrawingEarnings(uint256 sellPrice) public {
-        vm.assume(sellPrice > 0);
+    function testWithdrawingEarnings() public {
+        uint256 sellPrice = 1e18;
+        uint256 sellPriceAfterFee = sellPrice * platformFeeBps / 10_000;
         uint256 tokenId = nft.mintTo(seller);
         token.mint(buyer, sellPrice);
 
@@ -260,7 +321,7 @@ contract NFTMarketplaceTest is Test {
         nftMarketplace.withdrawEarnings(address(token));
         vm.stopPrank();
 
-        assertEq(token.balanceOf(seller), sellPrice);
+        assertEq(token.balanceOf(seller), sellPrice - sellPriceAfterFee);
     }
 
     function testWithdrawingWhenThereIsNoEarningsRevert() public {
@@ -289,6 +350,63 @@ contract NFTMarketplaceTest is Test {
         nftMarketplace.withdrawEarnings(address(0));
         vm.stopPrank();
     }
+
+    function testWithdrawPlatformEarnings() public {
+        uint256 sellPrice = 1e18;
+        uint256 fee = sellPrice * platformFeeBps / 10_000;
+        uint256 tokenId = nft.mintTo(seller);
+        token.mint(buyer, sellPrice);
+
+        vm.startPrank(address(seller));
+        nft.approve(address(nftMarketplace), tokenId);
+        nftMarketplace.listItem(
+            address(nft),
+            tokenId,
+            sellPrice,
+            address(token)
+        );
+        vm.stopPrank();
+
+        vm.startPrank(address(buyer));
+        token.approve(address(nftMarketplace), sellPrice);
+        nftMarketplace.buyItem(address(nft), tokenId);
+        vm.stopPrank();
+
+        nftMarketplace.withdrawPlatformEarnings(address(token));
+
+        assertEq(token.balanceOf(address(this)), fee);
+    }
+
+    function testWithdrawPlatformEarningsFromNotOwner() public {
+        vm.startPrank(address(buyer));
+        vm.expectRevert();
+        nftMarketplace.withdrawPlatformEarnings(address(token));
+        vm.stopPrank();
+    }
+
+    function testWithdrawPlatformWhenThereIsNoEarningsRevert() public {
+        vm.expectRevert(
+            bytes(
+                abi.encodeWithSelector(
+                    NFTMarketplace.NoEarnings.selector,
+                    address(token)
+                )
+            )
+        );
+        nftMarketplace.withdrawPlatformEarnings(address(token));
+    }
+
+    function testWithdrawPlatformForNotSupportedAsset() public {
+        vm.expectRevert(
+            bytes(
+                abi.encodeWithSelector(
+                    NFTMarketplace.AssetNotSupported.selector
+                )
+            )
+        );
+        nftMarketplace.withdrawPlatformEarnings(address(0));
+    }
+
 
     // TODO: test listing cancellation
 }

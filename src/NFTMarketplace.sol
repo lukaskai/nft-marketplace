@@ -239,7 +239,7 @@ contract NFTMarketplace is ReentrancyGuard, Ownable {
 
         asset.transferFrom(msg.sender, address(this), listedItem.price);
         uint platformFeeAmount = 0;
-        if (listedItem.price > 100000000) {
+        if (listedItem.price > 10_000) {
             platformFeeAmount = listedItem.price * platformFeeBps / 10_000;
         }
 
